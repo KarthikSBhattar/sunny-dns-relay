@@ -1,19 +1,8 @@
 /**
  * Sunny DNS Relay — deploy on Deno Deploy (deno.com/deploy)
- *
- * Privacy model:
- *   Client  ──DNS query (HTTPS)──▶  this relay (Deno)  ──DoH──▶  Cloudflare
- *   (your IP)                        (sees IP, not stored)          (sees Deno IP, not yours)
- *
- * ODoH public infrastructure was shut down by Cloudflare in 2025.
- * This relay gives the same ISP-level privacy (traffic looks like generic HTTPS
- * to deno.net) while keeping Cloudflare from seeing your real IP.
- *
- * Deploy: push to GitHub, connect at dash.deno.com, set entry point main.ts.
- * Free tier: 100k requests/day — plenty for a personal browser.
  */
 
-const UPSTREAM = "https://cloudflare-dns.com/dns-query";
+const UPSTREAM = "https://dns.quad9.net/dns-query";
 const DNS_CONTENT_TYPE = "application/dns-message";
 
 Deno.serve(async (request: Request): Promise<Response> => {
@@ -43,7 +32,7 @@ Deno.serve(async (request: Request): Promise<Response> => {
       method: "POST",
       headers: {
         "Content-Type": DNS_CONTENT_TYPE,
-        "Accept": DNS_CONTENT_TYPE,
+        Accept: DNS_CONTENT_TYPE,
       },
       body,
     });
