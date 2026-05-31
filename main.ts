@@ -1,54 +1,34 @@
 /**
- * Sunny ODoH Proxy — deploy on Deno Deploy (deno.com/deploy)
+ * Sunny DNS Relay — deploy on Deno Deploy (deno.com/deploy)
  *
  * Privacy model:
- *   Client  ──HPKE ciphertext──▶  this proxy (Deno)  ──forward──▶  Cloudflare target
- *   (your IP)                      (sees IP, not query)               (sees query, not IP)
+ *   Client  ──DNS query (HTTPS)──▶  this relay (Deno)  ──DoH──▶  Cloudflare
+ *   (your IP)                        (sees IP, not stored)          (sees Deno IP, not yours)
  *
- * Because Deno ≠ Cloudflare, neither party alone can correlate your identity
- * with your DNS queries. The blob is end-to-end encrypted — this proxy cannot
- * read it.
+ * ODoH public infrastructure was shut down by Cloudflare in 2025.
+ * This relay gives the same ISP-level privacy (traffic looks like generic HTTPS
+ * to deno.net) while keeping Cloudflare from seeing your real IP.
  *
- * Deploy:
- *   1. Push this file to a GitHub repo
- *   2. Connect the repo at dash.deno.com → New Project
- *   3. Set entry point to main.ts
- *   4. Deploy — you get https://YOUR_PROJECT.deno.dev
- *   5. Add "https://YOUR_PROJECT.deno.dev/proxy" to PROXIES in odoh.rs
- *
- * Free tier: 100k requests/day, 100 GiB/month — plenty for a personal browser.
+ * Deploy: push to GitHub, connect at dash.deno.com, set entry point main.ts.
+ * Free tier: 100k requests/day — plenty for a personal browser.
  */
 
-const ALLOWED_TARGETS: ReadonlySet<string> = new Set([
-  "odoh.cloudflare-dns.com",
-]);
-
-const ODOH_CONTENT_TYPE = "application/oblivious-dns-message";
+const UPSTREAM = "https://cloudflare-dns.com/dns-query";
+const DNS_CONTENT_TYPE = "application/dns-message";
 
 Deno.serve(async (request: Request): Promise<Response> => {
-  // Health check
-  if (request.method === "GET") {
-    const url = new URL(request.url);
-    if (url.pathname === "/health") {
-      return new Response("ok", { status: 200 });
-    }
+  const url = new URL(request.url);
+
+  if (request.method === "GET" && url.pathname === "/health") {
+    return new Response("ok");
   }
 
   if (request.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  const url = new URL(request.url);
-  const targetHost = url.searchParams.get("targethost");
-  const targetPath = url.searchParams.get("targetpath") ?? "/dns-query";
-
-  if (!targetHost || !ALLOWED_TARGETS.has(targetHost)) {
-    return new Response("Target not allowed", { status: 400 });
-  }
-
-  // Validate content type — must be an ODoH message, not arbitrary data
   const ct = request.headers.get("content-type") ?? "";
-  if (!ct.includes(ODOH_CONTENT_TYPE)) {
+  if (!ct.includes(DNS_CONTENT_TYPE)) {
     return new Response("Invalid content-type", { status: 415 });
   }
 
@@ -59,11 +39,11 @@ Deno.serve(async (request: Request): Promise<Response> => {
 
   let upstream: Response;
   try {
-    upstream = await fetch(`https://${targetHost}${targetPath}`, {
+    upstream = await fetch(UPSTREAM, {
       method: "POST",
       headers: {
-        "Content-Type": ODOH_CONTENT_TYPE,
-        "Accept": ODOH_CONTENT_TYPE,
+        "Content-Type": DNS_CONTENT_TYPE,
+        "Accept": DNS_CONTENT_TYPE,
       },
       body,
     });
@@ -72,12 +52,8 @@ Deno.serve(async (request: Request): Promise<Response> => {
     return new Response("Bad gateway", { status: 502 });
   }
 
-  if (!upstream.ok && upstream.status !== 200) {
-    console.error(`upstream ${targetHost} returned ${upstream.status}`);
-  }
-
   return new Response(upstream.body, {
     status: upstream.status,
-    headers: { "Content-Type": ODOH_CONTENT_TYPE },
+    headers: { "Content-Type": DNS_CONTENT_TYPE },
   });
 });
